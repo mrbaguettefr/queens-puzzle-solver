@@ -1,11 +1,26 @@
+from pathlib import Path
 from PIL import Image
 import numpy as np
 
 
-def extract_board_colors(path: str, grid_size: int = 8):
+def _rgb_to_hex(rgb):
+    r, g, b = rgb
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _find_palette_index(color, palette, threshold):
+    """Return index of close-enough color in palette, else None."""
+    for idx, p in enumerate(palette):
+        if max(abs(color[0] - p[0]), abs(color[1] - p[1]), abs(color[2] - p[2])) <= threshold:
+            return idx
+    return None
+
+
+def extract_board_colors(path: str, grid_size: int = 8, color_match_threshold: int = 10):
     """
-    Generate a numeric grid where each distinct cell color is assigned a unique number.
-    Also returns the palette list so numbers can be mapped back to hex colors.
+    Generate a numeric grid where each distinct cell color is assigned a unique number,
+    with a small tolerance when grouping similar colors.
+    Also returns the palette list (hex strings) so numbers can be mapped back to colors.
     Assumes an empty board: every cell is uniformly colored with no pieces to ignore.
     """
     img = Image.open(path).convert("RGB")
@@ -27,22 +42,23 @@ def extract_board_colors(path: str, grid_size: int = 8):
 
             avg = np.mean(samples, axis=0)
             r0, g0, b0 = [int(round(v)) for v in avg]
-            row.append(f"#{r0:02x}{g0:02x}{b0:02x}")
+            row.append((r0, g0, b0))
         color_grid.append(row)
 
-    # Build palette in first-appearance order
     palette = []
-    color_to_idx = {}
+    numeric_grid = []
     for row in color_grid:
+        num_row = []
         for color in row:
-            if color not in color_to_idx:
-                color_to_idx[color] = len(palette)
+            idx = _find_palette_index(color, palette, color_match_threshold)
+            if idx is None:
+                idx = len(palette)
                 palette.append(color)
+            num_row.append(idx)
+        numeric_grid.append(num_row)
 
-    # Replace colors with numeric ids
-    numeric_grid = [[color_to_idx[color] for color in row] for row in color_grid]
-
-    return numeric_grid, palette
+    palette_hex = [_rgb_to_hex(c) for c in palette]
+    return numeric_grid, palette_hex
 
 
 def solve_colored_queens(region_grid):
@@ -131,8 +147,43 @@ def format_solution(region_grid, solution):
     return "\n".join(" ".join(row) for row in board)
 
 
+def save_solution_image(board_path, region_grid, solution, crown_path="crown.png"):
+    """
+    Save a copy of the board image with crowns placed at the solved queen positions.
+    Output is written next to the input as `{original_name}_solution.png`.
+    """
+    base = Path(board_path)
+    out_path = base.with_name(f"{base.stem}_solution.png")
+
+    img = Image.open(board_path).convert("RGBA")
+    crown = Image.open(crown_path).convert("RGBA")
+
+    rows = len(region_grid)
+    cols = len(region_grid[0]) if rows else 0
+    if rows == 0 or cols == 0:
+        return None
+
+    cw = img.width / cols
+    ch = img.height / rows
+    crown_scale = 0.7  # fraction of cell size
+    target_w = int(cw * crown_scale)
+    target_h = int(ch * crown_scale)
+    crown_resized = crown.resize((target_w, target_h), Image.LANCZOS)
+
+    canvas = img.copy()
+    for _, (r, c) in solution.items():
+        cx = int((c + 0.5) * cw)
+        cy = int((r + 0.5) * ch)
+        x0 = cx - target_w // 2
+        y0 = cy - target_h // 2
+        canvas.alpha_composite(crown_resized, (x0, y0))
+
+    canvas.save(out_path)
+    return out_path
+
+
 if __name__ == "__main__":
-    cases = [("1.png", 9), ("2.png", 8), ("3.png", 7)]
+    cases = [("1.png", 9), ("2.png", 8), ("3.png", 7), ("4.png", 8)]
     for path, size in cases:
         print(f"\nFile: {path}, grid_size={size}")
         numeric_grid, palette = extract_board_colors(path, size)
@@ -147,3 +198,6 @@ if __name__ == "__main__":
             print("Solution (region_id -> (row, col)):", solution)
             print("Board visualization:")
             print(format_solution(numeric_grid, solution))
+            out = save_solution_image(path, numeric_grid, solution, crown_path="crown.png")
+            if out:
+                print(f"Saved solution image to {out}")
