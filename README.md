@@ -1,3 +1,5 @@
+![3.png solution](3_solution.png)
+
 Queens Puzzle Solver
 ====================
 
